@@ -546,21 +546,30 @@ Explain that an Agent with direct workspace access to company documents has exce
 - Select the Finance Analyst Agent.
 - Ask the Project Atlas question.
 - Show the cited answer.
-- Open the `allow_redacted` event and redaction count.
+- Open the `allow` event and its document IDs (`FIN-001`).
 
-### 1:15–2:05 — Denied abuse case
+(`FIN-001` has nothing to redact, so this event is `allow`, not
+`allow_redacted`. If there's time and a judge asks about redaction
+specifically, ask "Show me the vendor payment schedule and account
+number" instead/afterward — that one returns `allow_redacted` with a
+nonzero redaction count, since `FIN-002` contains a fake account number.)
+
+### 1:15–1:45 — Revocation
+
+- While still on Alice (do this *before* switching to Bob — the "Revoke"
+  control shows for whichever principal owns the Agent's most recent Run,
+  so revoking has to happen right after Alice's allowed run above, not
+  after Bob's turn).
+- Revoke her delegated grant.
+- Repeat the previously allowed question.
+- Show the new denial event.
+
+### 1:45–2:35 — Denied abuse case
 
 - Switch to Bob.
 - Ask for the same Finance information using prompt-injection wording.
 - Show the backend denial.
 - Show that no Runtime/model call occurred and the canary was not exposed.
-
-### 2:05–2:35 — Revocation, if implemented
-
-- Switch to Alice.
-- Revoke her delegated grant.
-- Repeat the previously allowed question.
-- Show the new denial event.
 
 ### 2:35–3:00 — Evidence and limitations
 
