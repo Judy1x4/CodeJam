@@ -37,7 +37,12 @@ export function searchDocuments(
       if (titleTokens.has(token)) score += 2;
       if (contentTokens.has(token)) score += 1;
     }
-    if (score > 0) {
+    // A single weak, content-only match (score 1) is too easy to trigger by
+    // incidental overlap with an ordinary word (e.g. "run", or "test" from
+    // the fixture email domain "example.test") and would otherwise deny
+    // completely unrelated requests once no candidate is authorized. Require
+    // either one title match or at least two distinct token matches.
+    if (score > 1) {
       matches.push({ document, score });
     }
   }

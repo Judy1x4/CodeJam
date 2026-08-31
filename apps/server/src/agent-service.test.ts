@@ -1,9 +1,10 @@
 import { mkdtemp } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentService } from "./agent-service.js";
 import { loadConfig } from "./config.js";
+import * as documentStoreModule from "./security/document-store.js";
 import { JsonStore } from "./store.js";
 import type { AgentRunner, RunnerRequest, RunnerResult } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
@@ -219,5 +220,32 @@ describe("VaultGate integration", () => {
     await expect(service.revokeGrant(agent.id, "bob-engineering")).rejects.toMatchObject({
       statusCode: 404,
     });
+  });
+
+  it("fails closed end-to-end when the middleware itself throws, not just when policy says no", async () => {
+    const spy = vi.spyOn(documentStoreModule, "searchDocuments").mockImplementation(() => {
+      throw new Error("simulated retrieval failure");
+    });
+    try {
+      const runner = new RecordingRunner();
+      const service = await makeService(runner);
+      const agent = await service.createAgent({ name: "Finance Analyst Agent" });
+      const { run } = await service.sendMessage(
+        agent.id,
+        "What were the approved expenses for Project Atlas?",
+        "alice-finance",
+      );
+
+      expect(runner.calls).toHaveLength(0);
+      const persistedRun = service.getRun(run.id);
+      expect(persistedRun.status).toBe("completed");
+      expect(service.getAgent(agent.id).status).toBe("ready");
+
+      const events = service.getSecurityEvents(run.id);
+      expect(events[0]?.decision).toBe("deny");
+      expect(events[0]?.reasonCode).toBe("internal_error");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

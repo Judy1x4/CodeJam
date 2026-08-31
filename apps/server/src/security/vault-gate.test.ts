@@ -98,6 +98,23 @@ describe("prepareContext", () => {
     expect(JSON.stringify(result)).not.toContain("8842-1930-5567");
   });
 
+  it("allows a generic baseline coding task through, even for an Agent with no grant profile", () => {
+    // Regression: this is the plan's own baseline acceptance-test prompt,
+    // run against an Agent name that matches no agentGrantProfiles entry.
+    // It must not be denied just because it doesn't concern any protected
+    // document. See the matching document-store.test.ts regression test.
+    const result = prepareContext({
+      principal: alice,
+      agentName: "BaselineCheck",
+      agentId: "agent-3",
+      runId: "run-baseline",
+      query:
+        "Create a TypeScript hello-world CLI, add a test, run it, and summarize the files you created.",
+    });
+    expect(result.decision).toBe("allow");
+    expect(result.envelope?.documents).toHaveLength(0);
+  });
+
   it("keeps the security event free of raw document content", () => {
     const result = prepareContext({
       principal: alice,

@@ -90,20 +90,20 @@ fi
 
 if [[ -n "${LOCAL_POC_DATA_ROOT:-}" ]]; then
   local_state_root="$LOCAL_POC_DATA_ROOT"
-  export APP_DATA_DIR="$local_state_root/data"
-  export AGENT_WORKSPACE_ROOT="$local_state_root/workspaces"
-  export CODEX_HOME="$local_state_root/codex-home"
 elif [[ "$(uname -s)" == "Darwin" ]]; then
   local_state_root="${HOME}/.volc-agent-launchpad"
-  export APP_DATA_DIR="${APP_DATA_DIR:-$local_state_root/data}"
-  export AGENT_WORKSPACE_ROOT="${AGENT_WORKSPACE_ROOT:-$local_state_root/workspaces}"
-  export CODEX_HOME="${CODEX_HOME:-$local_state_root/codex-home}"
 else
   local_state_root="$repo_dir/.local"
-  export APP_DATA_DIR="${APP_DATA_DIR:-$local_state_root/data}"
-  export AGENT_WORKSPACE_ROOT="${AGENT_WORKSPACE_ROOT:-$local_state_root/workspaces}"
-  export CODEX_HOME="${CODEX_HOME:-$local_state_root/codex-home}"
 fi
+# Always derive these from local_state_root, ignoring any APP_DATA_DIR /
+# AGENT_WORKSPACE_ROOT / CODEX_HOME already in the environment. Those
+# variables commonly arrive from a sourced .env pointing at container-only
+# paths like /app/data (correct for the ECS/Compose image, not this host
+# process) and would otherwise make the mkdir calls below fail with
+# EACCES. LOCAL_POC_DATA_ROOT above is the only supported override.
+export APP_DATA_DIR="$local_state_root/data"
+export AGENT_WORKSPACE_ROOT="$local_state_root/workspaces"
+export CODEX_HOME="$local_state_root/codex-home"
 export RUNTIME_INSTANCE_ID="${RUNTIME_INSTANCE_ID:-local-$(id -u)-$(printf '%s' "$repo_dir" | cksum | awk '{print $1}')}"
 
 mkdir -p "$APP_DATA_DIR" "$AGENT_WORKSPACE_ROOT" "$CODEX_HOME"
