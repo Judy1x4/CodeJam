@@ -21,23 +21,31 @@ export const demoPrincipals: DemoPrincipal[] = [
 
 // Real AgentGrant records bind to an Agent.id that only exists once an Agent
 // is created through the existing CRUD UI (Block 4). Until then, grants are
-// looked up by Agent display name against these profiles.
+// looked up by (principalId, Agent display name) against these profiles.
+// The grant is principal-specific: a profile only authorizes the principal
+// named in principalId, even if another principal selects the same Agent.
 export interface AgentGrantProfile {
+  principalId: string;
   agentName: string;
   departments: string[];
   maximumClassification: Classification;
+  revokedAt: string | null;
 }
 
 export const agentGrantProfiles: AgentGrantProfile[] = [
   {
+    principalId: "alice-finance",
     agentName: "Finance Analyst Agent",
     departments: ["Finance"],
     maximumClassification: "confidential",
+    revokedAt: null,
   },
   {
+    principalId: "bob-engineering",
     agentName: "Engineering Assistant Agent",
     departments: ["Engineering"],
     maximumClassification: "internal",
+    revokedAt: null,
   },
 ];
 

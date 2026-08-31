@@ -62,3 +62,68 @@ table (section 8). Block 3's policy evaluator is expected to resolve a real
 Agent to its profile by matching `agent.name` against this table; a proper
 `AgentGrant` record with a real `agentId` gets constructed once that Agent
 exists.
+
+## Day 1 — Block 3: Policy, retrieval, and redaction
+
+**Status:** done
+
+**What was done:**
+
+- Added `apps/server/src/security/document-store.ts` — deterministic local
+  keyword search over `protectedDocuments`, scoring by term overlap (title
+  matches weighted 2x, content matches 1x), no embeddings or external calls.
+- Added `apps/server/src/security/policy.ts` — `evaluateDocumentAccess`,
+  implementing the plan's rule order (section 12): inactive principal → grant
+  missing/revoked → department mismatch → restricted always blocked →
+  classification exceeds grant → authorized.
+- Added `apps/server/src/security/redactor.ts` — `redact`, four regex passes
+  (planted canary, API-key-shaped tokens, account-number format, email
+  addresses), returning cleaned text and a count; never returns or logs the
+  matched value.
+- Added `apps/server/src/security/vault-gate.ts` — `prepareContext`,
+  orchestrating search → policy → redaction → context envelope →
+  `SecurityEvent`, matching the request flow in plan section 7. Fails closed
+  (denies, records `reasonCode: "internal_error"`) if anything in the pipeline
+  throws.
+- Added one test file per module (`document-store.test.ts`, `policy.test.ts`,
+  `redactor.test.ts`, `vault-gate.test.ts`) covering the plan's section 14
+  test list, including the two exit-evidence cases.
+- Ran `npm run check` — clean (44 tests passing).
+
+**Exit evidence (per plan):** one test returns authorized redacted excerpts,
+another returns a denial with no excerpts. **Met** — see
+`vault-gate.test.ts`'s "returns an authorized, redacted excerpt for Alice"
+and "denies Bob's Engineering Agent from reading Finance documents".
+
+**Deviations from plan:**
+
+1. **Grant profiles needed to be principal-specific (fixes a Block 2 gap).**
+   The original `agentGrantProfiles` from Block 2 keyed grants only by Agent
+   display name, with no link to which principal holds the grant. That meant
+   Bob selecting the Finance Analyst Agent in the UI would have been
+   authorized by the same profile Alice uses — exactly the cross-user access
+   the plan's product story (section 3) requires VaultGate to deny. Fixed by
+   adding `principalId` and `revokedAt` to `AgentGrantProfile`, so a grant now
+   only matches a specific (principal, Agent name) pair. Covered by a
+   dedicated test in both `policy.test.ts` and `vault-gate.test.ts` ("denies
+   Bob even if he selects the Finance Analyst Agent").
+2. **Retrieval needed stopword filtering.** The initial keyword tokenizer
+   didn't exclude common words ("the", "and", "in", "all", ...). An
+   adversarial query containing several of these matched every fixture
+   document weakly, which caused `ENG-001` (an Engineering-internal document
+   Bob legitimately can read) to be pulled in as a retrieval candidate for a
+   query that was really asking about the restricted HR file. No security
+   invariant was broken — the canary and the restricted document itself never
+   leaked — but the response would have been a confusing partial answer
+   instead of a clean denial, which matters for the plan's abuse-case demo
+   (section 17). Fixed with a small stopword list in `document-store.ts`.
+3. **`policy.ts` returns only `authorized: boolean`, not the three-way
+   `PolicyDecision`.** Redaction-awareness (upgrading `allow` to
+   `allow_redacted`) lives in `vault-gate.ts` instead, keeping policy.ts a
+   pure authorization boundary — this was proposed and confirmed before
+   implementation, not a mid-implementation change.
+4. **The "redactor exception → fail closed" test lives in `vault-gate.test.ts`,
+   not `redactor.test.ts`.** Plain regex replacement doesn't throw on valid
+   string input, so that test mocks `redact` to throw and asserts
+   `vault-gate.ts`'s try/catch denies correctly — also proposed and confirmed
+   before implementation.
