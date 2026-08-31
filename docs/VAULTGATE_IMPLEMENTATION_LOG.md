@@ -404,3 +404,99 @@ logs (item 6), not just unit test assertions.
 **Deviations from plan:** none. This block's actual work turned out to be
 mostly bug-fixing rather than pure verification, which is exactly what the
 "robustness and clean validation" block is for — it did its job.
+
+## Day 2 — Block 4: Code freeze and documentation
+
+**Status:** done.
+
+**What was done:**
+
+- Checked the actual challenge brief (`docs/hackathon-v2-section-*.xml`,
+  the organizer's original document, distinct from this plan) and found an
+  unaddressed acceptance-checklist item: "The README names one selected
+  track." Nothing in the repo stated this anywhere.
+- `README.md`: added a prominent "Selected track: Bouncer" callout near
+  the top, and a full `## VaultGate (Bouncer track)` section — what it
+  does, a real screenshot from browser verification
+  (`docs/assets/vaultgate-bouncer-demo.png`), exact setup steps (the two
+  required Agent names), a "Reset for a clean demo run" procedure, and an
+  explicit mocked-vs-real breakdown. Linked the plan and this log from the
+  Documentation section.
+- `docs/ARCHITECTURE.md` — the diagram actually linked from the README and
+  the one a reviewer opens first — updated from the Starter Kit's original
+  diagram (no VaultGate, no trust boundary) to show VaultGate as the
+  implemented Bouncer seam, with its own Trust boundary and Known
+  limitations sections, and an Extension seams table marking Bouncer done
+  vs. Glass Box/Kill Switch not selected.
+- Ran `npm run check` — clean, unaffected by doc-only changes.
+- **Incident:** `docs/data_shapes.md` turned up deleted from disk partway
+  through this block, with no command of mine targeting that path.
+  Restored from git and verified it matched the last committed version
+  exactly before continuing. Recurred again in Block 5 (see below) —
+  flagged there.
+
+**Exit evidence (per plan):** a reviewer can understand and reproduce the
+POC without private guidance. **Met** — the README states the track, exact
+setup steps, and a screenshot; `ARCHITECTURE.md` gives the one-page
+diagram and trust boundary the challenge brief requires as a deliverable.
+
+**Deviations from plan:** none.
+
+## Day 2 — Block 5: Demo and Devpost draft
+
+**Status:** done for everything not requiring the user's own accounts/
+credentials (Devpost submission itself, pushing to a shared GitHub remote).
+
+**What was done:**
+
+- Rehearsed the full 3-minute script end to end against the real running
+  app (real Docker runtime, real Ark model) via a scripted, recorded
+  browser session — not a manual read-through.
+- The rehearsal found two real mismatches between the script and actual
+  behavior, both fixed in `VAULTGATE_PROJECT_PLAN.md` section 17:
+  1. The Allowed Run step claimed the Project Atlas question produces an
+     `allow_redacted` event; `FIN-001` has nothing to redact, so it's
+     plain `allow`. Corrected, with a note that the vendor-payment
+     question is the one that actually demonstrates redaction.
+  2. The "Revoke" control is tied to the Agent's most recent Run, not
+     scoped per principal — switching to Bob before revoking Alice's
+     grant hides her revoke option, since Bob's denial becomes the latest
+     event. Rather than patch this in the UI post-freeze (Block 4 froze
+     features), reordered the script: revoke immediately after Alice's
+     allowed run, *before* switching to Bob.
+- Recorded a backup demo video (Playwright, `recordVideo`) of the
+  corrected script end to end: Alice's allowed run, revocation, the
+  denial after revoke, and Bob's denied abuse-case attempt — delivered to
+  the user directly (not committed; it's a submission asset, not source).
+- Drafted the full Devpost text content (tagline, tags, and all the
+  standard long-description sections) grounded specifically in what was
+  built and found this session — including the two regressions from
+  Block 3 and this block's own script bugs as genuine "Challenges we ran
+  into" content, not generic hackathon copy — delivered to the user
+  directly for the same reason.
+- Ran `npm run check` — clean.
+- **Incident (recurrence):** `docs/data_shapes.md` was found deleted a
+  second time, discovered right after the recorded demo run (which
+  included one real Codex Agent execution). Investigated the container
+  mount configuration (`container-codex-runner.ts`) and confirmed each
+  Agent's container only bind-mounts its own `workspacePath` under
+  `.local/workspaces/<agentId>` and `codexHome` — never the repo root or
+  `docs/` — which rules out the Agent's own container as the mechanism.
+  No other cause was identified. Restored from git again and verified
+  against the committed version; flagged to the user as unresolved in
+  case it recurs after this session, since the cause is still unknown.
+
+**Exit evidence (per plan):** code is frozen, `npm run check` passes,
+submission assets are uploaded, and the demo consistently finishes within
+three minutes. **Partially met, by design:** code freeze and `npm run
+check` hold; the corrected script comfortably fits three minutes (roughly
+90 seconds of actual interaction plus narration); the backup video and
+Devpost draft are prepared and delivered to the user, but *uploading*
+them to Devpost requires the user's own account and wasn't something this
+session could or should do unilaterally.
+
+**Deviations from plan:** none in scope; the Devpost submission and
+pushing the branch to the shared GitHub remote are explicitly left to the
+user rather than done automatically, since both are actions visible to
+other people (a public submission, a shared remote) that call for the
+user's own explicit action, not an agent's.
