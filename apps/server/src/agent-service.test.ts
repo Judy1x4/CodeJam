@@ -24,6 +24,14 @@ class FakeRunner implements AgentRunner {
   }
 }
 
+class RecordingRunner extends FakeRunner {
+  readonly calls: RunnerRequest[] = [];
+  override async run(request: RunnerRequest): Promise<RunnerResult> {
+    this.calls.push(request);
+    return super.run(request);
+  }
+}
+
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
@@ -72,7 +80,7 @@ describe("Agent lifecycle", () => {
   it("persists a playground conversation", async () => {
     const service = await makeService();
     const agent = await service.createAgent({ name: "Coder" });
-    const { run } = await service.sendMessage(agent.id, "write hello world");
+    const { run } = await service.sendMessage(agent.id, "write hello world", "alice-finance");
     await expect.poll(() => service.getRun(run.id).status).toBe("completed");
     const messages = service.getMessages(agent.id);
     expect(messages.map((message) => message.role)).toEqual(["user", "assistant"]);
@@ -93,8 +101,8 @@ describe("Agent lifecycle", () => {
     const service = await makeService(runner);
     const agent = await service.createAgent({ name: "Concurrent" });
     const attempts = await Promise.allSettled([
-      service.sendMessage(agent.id, "first"),
-      service.sendMessage(agent.id, "second"),
+      service.sendMessage(agent.id, "first", "alice-finance"),
+      service.sendMessage(agent.id, "second", "alice-finance"),
     ]);
 
     expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
@@ -120,14 +128,69 @@ describe("Agent lifecycle", () => {
       isAvailable: async () => true,
     });
     const agent = await service.createAgent({ name: "Busy" });
-    const { run } = await service.sendMessage(agent.id, "first");
+    const { run } = await service.sendMessage(agent.id, "first", "alice-finance");
 
     await expect(service.startAgent(agent.id)).rejects.toMatchObject({ statusCode: 409 });
-    await expect(service.sendMessage(agent.id, "second")).rejects.toMatchObject({
+    await expect(service.sendMessage(agent.id, "second", "alice-finance")).rejects.toMatchObject({
       statusCode: 409,
     });
 
     finish({ output: "done", threadId: "thread", usage: null });
     await expect.poll(() => service.getRun(run.id).status).toBe("completed");
+  });
+});
+
+describe("VaultGate integration", () => {
+  it("invokes the runner with sanitized context for an authorized, redacted request", async () => {
+    const runner = new RecordingRunner();
+    const service = await makeService(runner);
+    const agent = await service.createAgent({ name: "Finance Analyst Agent" });
+    const { run } = await service.sendMessage(
+      agent.id,
+      "vendor payment schedule account number",
+      "alice-finance",
+    );
+    await expect.poll(() => service.getRun(run.id).status).toBe("completed");
+
+    expect(runner.calls).toHaveLength(1);
+    expect(runner.calls[0]?.prompt).not.toContain("8842-1930-5567");
+    expect(run.prompt).toBe("vendor payment schedule account number");
+
+    const events = service.getSecurityEvents(run.id);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.decision).toBe("allow_redacted");
+  });
+
+  it("never invokes the runner for a denied request", async () => {
+    const runner = new RecordingRunner();
+    const service = await makeService(runner);
+    const agent = await service.createAgent({ name: "Engineering Assistant Agent" });
+    const { run } = await service.sendMessage(
+      agent.id,
+      "Project Atlas approved expenses budget variance",
+      "bob-engineering",
+    );
+
+    expect(runner.calls).toHaveLength(0);
+    const persistedRun = service.getRun(run.id);
+    expect(persistedRun.status).toBe("completed");
+    expect(persistedRun.output).not.toContain("SGD 418,000");
+    expect(service.getAgent(agent.id).status).toBe("ready");
+
+    const events = service.getSecurityEvents(run.id);
+    expect(events[0]?.decision).toBe("deny");
+  });
+
+  it("fails closed for an unknown demo principal, before creating any Run", async () => {
+    const runner = new RecordingRunner();
+    const service = await makeService(runner);
+    const agent = await service.createAgent({ name: "Finance Analyst Agent" });
+
+    await expect(
+      service.sendMessage(agent.id, "hello", "unknown-principal"),
+    ).rejects.toMatchObject({ statusCode: 401 });
+
+    expect(runner.calls).toHaveLength(0);
+    expect(service.getRuns(agent.id)).toHaveLength(0);
   });
 });

@@ -127,3 +127,68 @@ and "denies Bob's Engineering Agent from reading Finance documents".
    string input, so that test mocks `redact` to throw and asserts
    `vault-gate.ts`'s try/catch denies correctly — also proposed and confirmed
    before implementation.
+
+## Day 1 — Block 4: AgentService integration
+
+**Status:** done
+
+**What was done:**
+
+- `apps/server/src/types.ts` — added `securityEvents: SecurityEvent[]` to
+  `Database`.
+- `apps/server/src/store.ts` — defaults `securityEvents` to `[]` for both a
+  fresh database and one loaded from a pre-existing `db.json` that predates
+  the field.
+- `apps/server/src/agent-service.ts`:
+  - `sendMessage` now takes a third `principalId` argument. It resolves the
+    principal against `demoPrincipals` and fails closed with `401` for an
+    unknown or inactive principal, before any `Run` is created.
+  - Calls `prepareContext` (Block 3) before entering the store transaction
+    that checks the Agent's busy/stopped status, using the Agent's `.name`
+    for the grant lookup.
+  - On `deny`: still persists the user `Message` and an `AgentRun`, but
+    resolves the Run immediately with a fixed denial message and an
+    assistant `Message` carrying that same text — `AgentRunner.run` is never
+    called, and the Agent's status never becomes `busy`.
+  - On `allow` / `allow_redacted`: persisted `AgentRun.prompt` stays the
+    original user message; the string actually sent to `AgentRunner.run` is
+    the VaultGate context envelope plus the question — except when nothing
+    relevant was retrieved, in which case the original raw prompt is sent
+    unwrapped, so a non-document coding task (the baseline acceptance
+    scenario) reaches Codex unchanged.
+  - Every call persists a `SecurityEvent`, regardless of decision.
+  - Added `listPrincipals()` and `getSecurityEvents(runId)`.
+- `apps/server/src/app.ts`:
+  - `POST /api/agents/:id/messages` now requires an `X-Demo-Principal` header
+    matching a known principal ID; an invalid or missing header is rejected
+    with `400` before `AgentService.sendMessage` is ever called.
+  - Added `GET /api/security/principals` and `GET /api/runs/:id/security-events`.
+  - Did **not** add `POST /api/agents/:id/security/revoke` — the plan marks
+    grant revocation P1 ("add only after P0 is stable"), so it's deferred to
+    Day 2.
+- Updated `agent-service.test.ts`'s existing lifecycle tests to pass a
+  principal (`"alice-finance"`) with the new `sendMessage` signature, and
+  added a `VaultGate integration` test group: authorized+redacted invokes the
+  runner with sanitized context, a denial never invokes the runner, and an
+  unknown principal is rejected before any Run exists.
+- Added a test to `app.test.ts` proving a missing or unknown
+  `X-Demo-Principal` header is rejected at the HTTP layer without reaching
+  `AgentService`.
+- Ran `npm run check` — clean (48 tests passing).
+
+**Exit evidence (per plan):** an API-level test proves a denied request never
+invokes the runner; an allowed request invokes it with sanitized context.
+**Met** — see `agent-service.test.ts`'s `VaultGate integration` group.
+
+**Deviations from plan:** none beyond the design decision already flagged and
+confirmed before implementation (the deny-path behavior: still create a
+`Message`/`AgentRun`, resolve immediately with a generic denial message,
+never touch the runner or `RunStatus`).
+
+**Note, not a deviation:** the existing web Playground UI can no longer send
+a message successfully as-is, since it doesn't yet send an `X-Demo-Principal`
+header — every request now gets `400`. This is expected: the plan's own Day 1
+definition of done states "the middleware works end to end through the
+backend with automated evidence. The UI may still be unchanged." The
+principal selector that fixes this is Day 2 Block 1 scope, not a regression
+introduced here.

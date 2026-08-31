@@ -7,6 +7,9 @@ import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import { HttpError } from "./errors.js";
 import type { AgentService } from "./agent-service.js";
+import { demoPrincipals } from "./security/fixtures.js";
+
+const knownPrincipalIds = new Set(demoPrincipals.map((principal) => principal.id));
 
 const agentIdParams = z.object({ id: z.string().uuid() });
 const runIdParams = z.object({ id: z.string().uuid() });
@@ -119,13 +122,26 @@ export async function createApp(
   app.post("/api/agents/:id/messages", async (request, reply) => {
     const { id } = agentIdParams.parse(request.params);
     const body = messageBody.parse(request.body);
-    const result = await service.sendMessage(id, body.content);
+    const principalId = request.headers["x-demo-principal"];
+    if (typeof principalId !== "string" || !knownPrincipalIds.has(principalId)) {
+      throw new HttpError(400, "A valid X-Demo-Principal header is required");
+    }
+    const result = await service.sendMessage(id, body.content, principalId);
     return reply.code(202).send(result);
   });
+
+  app.get("/api/security/principals", async () => ({
+    principals: service.listPrincipals(),
+  }));
 
   app.get("/api/runs/:id", async (request) => {
     const { id } = runIdParams.parse(request.params);
     return { run: service.getRun(id) };
+  });
+
+  app.get("/api/runs/:id/security-events", async (request) => {
+    const { id } = runIdParams.parse(request.params);
+    return { securityEvents: service.getSecurityEvents(id) };
   });
 
   if (config.nodeEnv === "production") {

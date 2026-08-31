@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import type { AgentService } from "./agent-service.js";
@@ -7,6 +7,8 @@ const service = {
   listAgents: () => [],
   systemInfo: async () => ({}),
 } as unknown as AgentService;
+
+const AN_AGENT_ID = "123e4567-e89b-12d3-a456-426614174000";
 
 describe("HTTP boundary", () => {
   it("protects API routes with the configured shared token", async () => {
@@ -43,6 +45,33 @@ describe("HTTP boundary", () => {
       payload: JSON.stringify({ name: "x".repeat(1_100_000) }),
     });
     expect(oversized.statusCode).toBe(413);
+    await app.close();
+  });
+
+  it("rejects a message request with a missing or unknown X-Demo-Principal header before touching AgentService", async () => {
+    const sendMessage = vi.fn();
+    const app = await createApp(loadConfig({ NODE_ENV: "test" }), {
+      ...service,
+      sendMessage,
+    } as unknown as AgentService);
+
+    const missingHeader = await app.inject({
+      method: "POST",
+      url: `/api/agents/${AN_AGENT_ID}/messages`,
+      headers: { "content-type": "application/json" },
+      payload: JSON.stringify({ content: "hello" }),
+    });
+    expect(missingHeader.statusCode).toBe(400);
+
+    const unknownPrincipal = await app.inject({
+      method: "POST",
+      url: `/api/agents/${AN_AGENT_ID}/messages`,
+      headers: { "content-type": "application/json", "x-demo-principal": "mallory" },
+      payload: JSON.stringify({ content: "hello" }),
+    });
+    expect(unknownPrincipal.statusCode).toBe(400);
+
+    expect(sendMessage).not.toHaveBeenCalled();
     await app.close();
   });
 });

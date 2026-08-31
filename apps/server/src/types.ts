@@ -1,3 +1,5 @@
+import type { SecurityEvent } from "./security/types.js";
+
 export type AgentStatus = "ready" | "busy" | "stopped" | "error";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type MessageRole = "user" | "assistant";
@@ -48,6 +50,7 @@ export interface Database {
   agents: Agent[];
   messages: Message[];
   runs: AgentRun[];
+  securityEvents: SecurityEvent[];
 }
 
 export interface CreateAgentInput {
