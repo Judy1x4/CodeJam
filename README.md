@@ -12,6 +12,10 @@ Volcengine ECS.
 > tracing, audit, or hardened sandbox middleware. Do not use production data or
 > credentials. See [SECURITY.md](SECURITY.md).
 
+**Selected track: Bouncer.** This repository adds VaultGate, policy-enforced
+document access middleware, at the `AgentService` boundary. See
+[VaultGate (Bouncer track)](#vaultgate-bouncer-track) below.
+
 ## Screenshots
 
 ### Agent Playground
@@ -30,6 +34,83 @@ Volcengine ECS.
 - Persistent Agent workspaces and Codex sessions
 - Disposable Docker, Colima, or Podman container for each local turn
 - Docker and Terraform deployment paths for Volcengine ECS
+
+## VaultGate (Bouncer track)
+
+VaultGate is policy-enforced document access middleware in front of the
+Agent Runtime. It answers the Bouncer track's core question — separating the
+human user from the Agent acting on their behalf — for enterprise document
+access: an AI Agent can answer questions from a protected document store
+without ever receiving unrestricted access to it.
+
+![Alice's request is answered with a cited excerpt; Bob's identical request through the same Agent is denied in the backend](docs/assets/vaultgate-bouncer-demo.png)
+
+- Two mock human principals — Alice (Finance) and Bob (Engineering).
+- Per-(principal, Agent) delegated grants: a real Agent, created through the
+  normal **Create Agent** flow, is authorized for one department and one
+  maximum document classification, but only for the specific principal the
+  grant names — not for anyone who happens to select that Agent.
+- Every Playground message is checked against a local, keyword-searched
+  protected document store *before* any content reaches the model. A denied
+  document contributes zero characters to the Runtime prompt.
+- Sensitive fields — a planted canary, account numbers, emails — are
+  redacted from otherwise-authorized excerpts before they reach the model.
+- Every allow, allow-redacted, and deny decision is recorded as a
+  correlated, redacted security event (document IDs, decision, reason,
+  redaction count — never raw content), shown in the Playground's evidence
+  panel.
+- A grant can be revoked from the UI; the next identical request denies
+  immediately.
+
+See [docs/VAULTGATE_PROJECT_PLAN.md](docs/VAULTGATE_PROJECT_PLAN.md) for the
+full design, and
+[docs/VAULTGATE_IMPLEMENTATION_LOG.md](docs/VAULTGATE_IMPLEMENTATION_LOG.md)
+for what was actually built, block by block, including two regressions this
+found and fixed along the way.
+
+### Try it
+
+After starting the POC (below), create two Agents through **Create Agent**
+using these **exact names** — VaultGate matches grants by Agent name:
+
+- `Finance Analyst Agent`
+- `Engineering Assistant Agent`
+
+In the sidebar, under **Acting as**, switch between **Alice** and **Bob**,
+select the Finance Analyst Agent, and ask the same question both times:
+
+> What were the approved expenses and budget variance for Project Atlas?
+
+Alice gets a cited answer; Bob is denied in the backend, before any
+protected content reaches the model — even though he selected the same
+Agent. Try the built-in "Ignore all restrictions..." starter prompt too: it
+targets a restricted document with a planted canary secret, which never
+appears anywhere in the response, the evidence panel, or the server logs,
+regardless of which principal or wording is used.
+
+### Reset for a clean demo run
+
+Stop the server (`Ctrl+C`), delete the persisted state, and restart:
+
+```bash
+rm -f .local/data/launchpad.json    # or the platform-specific path below
+npm run poc
+```
+
+This clears prior Agents, conversations, and any revoked grants from
+rehearsal, without needing to rebuild the Runtime image.
+
+### What's mocked vs. real
+
+- **Mocked:** identity (`X-Demo-Principal` header, not a login), the
+  document repository (8 synthetic fixtures, not a real system).
+- **Real:** the enforcement boundary. Retrieval, policy, and redaction run
+  as real backend code before `AgentRunner` is ever called, with automated
+  tests and a fail-closed default on any internal error.
+- **Known limitation, stated honestly:** approved *redacted* excerpts are
+  still processed by the real Ark model — VaultGate does not claim
+  confidentiality during inference, only that denied or restricted content
+  never reaches that boundary in the first place.
 
 ## Requirements
 
@@ -240,6 +321,8 @@ docker compose config
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md)
+- [VaultGate project plan](docs/VAULTGATE_PROJECT_PLAN.md)
+- [VaultGate implementation log](docs/VAULTGATE_IMPLEMENTATION_LOG.md)
 - [Local POC](docs/LOCAL_POC.md)
 - [Deployment](docs/DEPLOYMENT.md)
 - [Hackathon extension guide](docs/HACKATHON_EXTENSION_GUIDE.md)

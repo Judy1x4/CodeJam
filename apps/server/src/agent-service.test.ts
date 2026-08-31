@@ -1,9 +1,10 @@
 import { mkdtemp } from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentService } from "./agent-service.js";
 import { loadConfig } from "./config.js";
+import * as documentStoreModule from "./security/document-store.js";
 import { JsonStore } from "./store.js";
 import type { AgentRunner, RunnerRequest, RunnerResult } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
@@ -21,6 +22,14 @@ class FakeRunner implements AgentRunner {
   }
   async isAvailable(): Promise<boolean> {
     return true;
+  }
+}
+
+class RecordingRunner extends FakeRunner {
+  readonly calls: RunnerRequest[] = [];
+  override async run(request: RunnerRequest): Promise<RunnerResult> {
+    this.calls.push(request);
+    return super.run(request);
   }
 }
 
@@ -72,7 +81,7 @@ describe("Agent lifecycle", () => {
   it("persists a playground conversation", async () => {
     const service = await makeService();
     const agent = await service.createAgent({ name: "Coder" });
-    const { run } = await service.sendMessage(agent.id, "write hello world");
+    const { run } = await service.sendMessage(agent.id, "write hello world", "alice-finance");
     await expect.poll(() => service.getRun(run.id).status).toBe("completed");
     const messages = service.getMessages(agent.id);
     expect(messages.map((message) => message.role)).toEqual(["user", "assistant"]);
@@ -93,8 +102,8 @@ describe("Agent lifecycle", () => {
     const service = await makeService(runner);
     const agent = await service.createAgent({ name: "Concurrent" });
     const attempts = await Promise.allSettled([
-      service.sendMessage(agent.id, "first"),
-      service.sendMessage(agent.id, "second"),
+      service.sendMessage(agent.id, "first", "alice-finance"),
+      service.sendMessage(agent.id, "second", "alice-finance"),
     ]);
 
     expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
@@ -120,14 +129,123 @@ describe("Agent lifecycle", () => {
       isAvailable: async () => true,
     });
     const agent = await service.createAgent({ name: "Busy" });
-    const { run } = await service.sendMessage(agent.id, "first");
+    const { run } = await service.sendMessage(agent.id, "first", "alice-finance");
 
     await expect(service.startAgent(agent.id)).rejects.toMatchObject({ statusCode: 409 });
-    await expect(service.sendMessage(agent.id, "second")).rejects.toMatchObject({
+    await expect(service.sendMessage(agent.id, "second", "alice-finance")).rejects.toMatchObject({
       statusCode: 409,
     });
 
     finish({ output: "done", threadId: "thread", usage: null });
     await expect.poll(() => service.getRun(run.id).status).toBe("completed");
+  });
+});
+
+describe("VaultGate integration", () => {
+  it("invokes the runner with sanitized context for an authorized, redacted request", async () => {
+    const runner = new RecordingRunner();
+    const service = await makeService(runner);
+    const agent = await service.createAgent({ name: "Finance Analyst Agent" });
+    const { run } = await service.sendMessage(
+      agent.id,
+      "vendor payment schedule account number",
+      "alice-finance",
+    );
+    await expect.poll(() => service.getRun(run.id).status).toBe("completed");
+
+    expect(runner.calls).toHaveLength(1);
+    expect(runner.calls[0]?.prompt).not.toContain("8842-1930-5567");
+    expect(run.prompt).toBe("vendor payment schedule account number");
+
+    const events = service.getSecurityEvents(run.id);
+    expect(events).toHaveLength(1);
+    expect(events[0]?.decision).toBe("allow_redacted");
+  });
+
+  it("never invokes the runner for a denied request", async () => {
+    const runner = new RecordingRunner();
+    const service = await makeService(runner);
+    const agent = await service.createAgent({ name: "Engineering Assistant Agent" });
+    const { run } = await service.sendMessage(
+      agent.id,
+      "Project Atlas approved expenses budget variance",
+      "bob-engineering",
+    );
+
+    expect(runner.calls).toHaveLength(0);
+    const persistedRun = service.getRun(run.id);
+    expect(persistedRun.status).toBe("completed");
+    expect(persistedRun.output).not.toContain("SGD 418,000");
+    expect(service.getAgent(agent.id).status).toBe("ready");
+
+    const events = service.getSecurityEvents(run.id);
+    expect(events[0]?.decision).toBe("deny");
+  });
+
+  it("fails closed for an unknown demo principal, before creating any Run", async () => {
+    const runner = new RecordingRunner();
+    const service = await makeService(runner);
+    const agent = await service.createAgent({ name: "Finance Analyst Agent" });
+
+    await expect(
+      service.sendMessage(agent.id, "hello", "unknown-principal"),
+    ).rejects.toMatchObject({ statusCode: 401 });
+
+    expect(runner.calls).toHaveLength(0);
+    expect(service.getRuns(agent.id)).toHaveLength(0);
+  });
+
+  it("denies a previously-successful request after the grant is revoked", async () => {
+    const runner = new RecordingRunner();
+    const service = await makeService(runner);
+    const agent = await service.createAgent({ name: "Finance Analyst Agent" });
+    const question = "What were the approved expenses and budget variance for Project Atlas?";
+
+    const first = await service.sendMessage(agent.id, question, "alice-finance");
+    await expect.poll(() => service.getRun(first.run.id).status).toBe("completed");
+    expect(service.getSecurityEvents(first.run.id)[0]?.decision).not.toBe("deny");
+
+    await service.revokeGrant(agent.id, "alice-finance");
+
+    const second = await service.sendMessage(agent.id, question, "alice-finance");
+    expect(runner.calls).toHaveLength(1); // still just the one call from before the revoke
+    expect(service.getRun(second.run.id).status).toBe("completed");
+    expect(service.getSecurityEvents(second.run.id)[0]?.decision).toBe("deny");
+  });
+
+  it("rejects revoking a grant that was never granted", async () => {
+    const service = await makeService();
+    const agent = await service.createAgent({ name: "Finance Analyst Agent" });
+
+    await expect(service.revokeGrant(agent.id, "bob-engineering")).rejects.toMatchObject({
+      statusCode: 404,
+    });
+  });
+
+  it("fails closed end-to-end when the middleware itself throws, not just when policy says no", async () => {
+    const spy = vi.spyOn(documentStoreModule, "searchDocuments").mockImplementation(() => {
+      throw new Error("simulated retrieval failure");
+    });
+    try {
+      const runner = new RecordingRunner();
+      const service = await makeService(runner);
+      const agent = await service.createAgent({ name: "Finance Analyst Agent" });
+      const { run } = await service.sendMessage(
+        agent.id,
+        "What were the approved expenses for Project Atlas?",
+        "alice-finance",
+      );
+
+      expect(runner.calls).toHaveLength(0);
+      const persistedRun = service.getRun(run.id);
+      expect(persistedRun.status).toBe("completed");
+      expect(service.getAgent(agent.id).status).toBe("ready");
+
+      const events = service.getSecurityEvents(run.id);
+      expect(events[0]?.decision).toBe("deny");
+      expect(events[0]?.reasonCode).toBe("internal_error");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
 import { isArkConfigured } from "./config.js";
 import { HttpError, RunCancelledError } from "./errors.js";
+import { agentGrantProfiles, demoPrincipals } from "./security/fixtures.js";
+import { applyRevocations } from "./security/policy.js";
+import type { DemoPrincipal, SecurityEvent } from "./security/types.js";
+import { prepareContext } from "./security/vault-gate.js";
 import { JsonStore } from "./store.js";
 import type {
   Agent,
@@ -12,6 +16,8 @@ import type {
   UpdateAgentInput,
 } from "./types.js";
 import { WorkspaceManager } from "./workspace.js";
+
+const POLICY_DENIAL_MESSAGE = "This request was denied by VaultGate policy. No protected content was sent to the model.";
 
 const now = () => new Date().toISOString();
 
@@ -150,9 +156,47 @@ export class AgentService {
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
+  listPrincipals(): DemoPrincipal[] {
+    return demoPrincipals;
+  }
+
+  getSecurityEvents(runId: string): SecurityEvent[] {
+    this.getRun(runId);
+    return this.store
+      .snapshot()
+      .securityEvents.filter((event) => event.runId === runId)
+      .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  }
+
+  async revokeGrant(agentId: string, principalId: string): Promise<void> {
+    const principal = demoPrincipals.find((candidate) => candidate.id === principalId);
+    if (!principal) {
+      throw new HttpError(404, "Unknown demo principal");
+    }
+    const agent = this.getAgent(agentId);
+    const hasProfile = agentGrantProfiles.some(
+      (profile) => profile.principalId === principalId && profile.agentName === agent.name,
+    );
+    if (!hasProfile) {
+      throw new HttpError(404, "No grant exists for this principal on this Agent");
+    }
+    const timestamp = now();
+    await this.store.mutate((database) => {
+      const existing = database.revokedGrants.find(
+        (entry) => entry.principalId === principalId && entry.agentName === agent.name,
+      );
+      if (existing) {
+        existing.revokedAt = timestamp;
+      } else {
+        database.revokedGrants.push({ principalId, agentName: agent.name, revokedAt: timestamp });
+      }
+    });
+  }
+
   async sendMessage(
     agentId: string,
     prompt: string,
+    principalId: string,
   ): Promise<{ run: AgentRun; message: Message }> {
     if (!isArkConfigured(this.config)) {
       throw new HttpError(
@@ -160,18 +204,37 @@ export class AgentService {
         "Ark is not configured. Set ARK_API_KEY and ARK_MODEL, then restart.",
       );
     }
+    const principal = demoPrincipals.find((candidate) => candidate.id === principalId);
+    if (!principal || !principal.active) {
+      throw new HttpError(401, "Unknown or inactive demo principal");
+    }
+    const agent = this.getAgent(agentId);
     const timestamp = now();
     const runId = randomUUID();
+    const effectiveGrants = applyRevocations(agentGrantProfiles, this.store.snapshot().revokedGrants);
+    const vaultResult = prepareContext({
+      principal,
+      agentName: agent.name,
+      agentId,
+      runId,
+      query: prompt,
+      grants: effectiveGrants,
+    });
+    const denied = vaultResult.decision === "deny";
+    const securedPrompt =
+      !denied && vaultResult.envelope && vaultResult.envelope.documents.length > 0
+        ? vaultResult.envelope.promptText + "\n\nUSER REQUEST\n" + prompt
+        : prompt;
     const run: AgentRun = {
       id: runId,
       agentId,
-      status: "queued",
+      status: denied ? "completed" : "queued",
       prompt,
-      output: null,
+      output: denied ? POLICY_DENIAL_MESSAGE : null,
       error: null,
       usage: null,
       startedAt: null,
-      completedAt: null,
+      completedAt: denied ? timestamp : null,
       createdAt: timestamp,
     };
     const message: Message = {
@@ -182,6 +245,16 @@ export class AgentService {
       content: prompt,
       createdAt: timestamp,
     };
+    const denialMessage: Message | null = denied
+      ? {
+          id: randomUUID(),
+          agentId,
+          runId,
+          role: "assistant",
+          content: POLICY_DENIAL_MESSAGE,
+          createdAt: timestamp,
+        }
+      : null;
     const agentAtStart = await this.store.mutate((database) => {
       const storedAgent = database.agents.find((item) => item.id === agentId);
       if (!storedAgent) {
@@ -195,21 +268,30 @@ export class AgentService {
       }
       database.runs.push(run);
       database.messages.push(message);
+      if (denialMessage) {
+        database.messages.push(denialMessage);
+      }
+      database.securityEvents.push(vaultResult.securityEvent);
       const snapshot = structuredClone(storedAgent);
-      storedAgent.status = "busy";
+      if (!denied) {
+        storedAgent.status = "busy";
+      }
       storedAgent.lastError = null;
       storedAgent.updatedAt = timestamp;
       return snapshot;
     });
-    const execution = this.executeRun(agentAtStart, run);
-    this.activeExecutions.set(agentId, execution);
-    void execution
-      .finally(() => {
-        if (this.activeExecutions.get(agentId) === execution) {
-          this.activeExecutions.delete(agentId);
-        }
-      })
-      .catch(() => undefined);
+
+    if (!denied) {
+      const execution = this.executeRun(agentAtStart, run, securedPrompt);
+      this.activeExecutions.set(agentId, execution);
+      void execution
+        .finally(() => {
+          if (this.activeExecutions.get(agentId) === execution) {
+            this.activeExecutions.delete(agentId);
+          }
+        })
+        .catch(() => undefined);
+    }
     return { run, message };
   }
 
@@ -232,7 +314,7 @@ export class AgentService {
     };
   }
 
-  private async executeRun(agentAtStart: Agent, run: AgentRun): Promise<void> {
+  private async executeRun(agentAtStart: Agent, run: AgentRun, securedPrompt: string): Promise<void> {
     await this.store.mutate((database) => {
       const storedRun = database.runs.find((item) => item.id === run.id);
       if (storedRun) {
@@ -247,7 +329,7 @@ export class AgentService {
       const result = await this.runner.run({
         agentId: agentAtStart.id,
         workspacePath: agentAtStart.workspacePath,
-        prompt: run.prompt,
+        prompt: securedPrompt,
         threadId: agentAtStart.codexThreadId,
       });
       const completedAt = now();
