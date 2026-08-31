@@ -33,16 +33,21 @@ export function searchDocuments(
     const titleTokens = new Set(tokenize(document.title));
     const contentTokens = new Set(tokenize(document.content));
     let score = 0;
+    let distinctMatches = 0;
     for (const token of queryTokens) {
-      if (titleTokens.has(token)) score += 2;
-      if (contentTokens.has(token)) score += 1;
+      const inTitle = titleTokens.has(token);
+      const inContent = contentTokens.has(token);
+      if (inTitle) score += 2;
+      if (inContent) score += 1;
+      if (inTitle || inContent) distinctMatches += 1;
     }
-    // A single weak, content-only match (score 1) is too easy to trigger by
-    // incidental overlap with an ordinary word (e.g. "run", or "test" from
-    // the fixture email domain "example.test") and would otherwise deny
-    // completely unrelated requests once no candidate is authorized. Require
-    // either one title match or at least two distinct token matches.
-    if (score > 1) {
+    // A single matching token — even a title match — is too easy to trigger
+    // by incidental overlap with an ordinary word ("run", "test" from the
+    // fixture email domain, or "summary" from a completely unrelated
+    // "weather summary" coding task matching FIN-001's title) and would
+    // otherwise deny or pollute completely unrelated requests. Require at
+    // least two distinct query tokens to match, not just a weighted score.
+    if (distinctMatches > 1) {
       matches.push({ document, score });
     }
   }

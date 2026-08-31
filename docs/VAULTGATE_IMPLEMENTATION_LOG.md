@@ -500,3 +500,38 @@ pushing the branch to the shared GitHub remote are explicitly left to the
 user rather than done automatically, since both are actions visible to
 other people (a public submission, a shared remote) that call for the
 user's own explicit action, not an agent's.
+
+## Addendum: retrieval false-positive found during manual testing
+
+After Block 5, the user tested the app manually (not via automation) and
+hit a real bug within a few minutes: clicking through to the app's own
+`starterPrompts` entry "Create a small TypeScript CLI that prints a
+weather summary from sample JSON" (as Bob, on the Finance Analyst Agent)
+returned `deny`, `grant_missing_or_revoked`, `resourceIds: ["FIN-001"]`.
+
+**Root cause:** the word "summary" is in `FIN-001`'s title ("Project Atlas
+Budget Summary"). A single title-word match scores 2 under Block 3's
+threshold fix (`score > 1`), so it passed — Block 3's fix only closed the
+single-*content*-word gap (weight 1), not the single-*title*-word gap
+(weight 2), and this exact wording was never in the automated regression
+suite; the Block 3 regression test used "summarize," a different token
+that happens not to collide.
+
+**Fix:** `document-store.ts` now requires at least two *distinct* matching
+query tokens, not a weighted score threshold — a lone title match is
+exactly as fragile as a lone content match once the word is common enough.
+Verified against all existing intentional-match tests (still pass) and
+added: a direct regression test for this exact query, and a test asserting
+all three non-abuse `starterPrompts` entries return zero candidates
+(closing the actual gap — the app's own suggested prompts had never been
+tested against retrieval as a set). Re-verified live against the running
+server with the exact (principal, Agent, query) that failed.
+
+**Why this matters beyond the one bug:** this is the same class of issue
+Block 3 found (a common word incidentally matching a fixture document),
+caught the same way — by a human actually clicking through the real app
+rather than trusting the test suite alone. Two instances of this class of
+bug now, both found through manual/integration testing that unit tests
+alone didn't catch. Worth remembering if more fixture documents or starter
+prompts are added later: re-run retrieval against the full prompt surface,
+not just the specific queries a test happens to already cover.
