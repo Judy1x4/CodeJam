@@ -210,6 +210,48 @@ button {
   text-transform: uppercase;
 }
 
+.principal-list {
+  display: flex;
+  gap: 6px;
+}
+
+.principal-card {
+  flex: 1;
+  border: 1px solid transparent;
+  background: #2e2e2a;
+  padding: 8px 10px;
+  border-radius: 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: 150ms ease;
+}
+
+.principal-card:hover {
+  background: #34342f;
+}
+
+.principal-card.selected {
+  background: #3a3833;
+  border-color: #826ff0;
+  box-shadow: inset 0 0 0 1px rgba(130, 111, 240, 0.35);
+}
+
+.principal-card strong,
+.principal-card span {
+  display: block;
+}
+
+.principal-card strong {
+  font-size: 11px;
+  color: #edebe4;
+}
+
+.principal-card span {
+  font-size: 9px;
+  color: #8e8e87;
+  margin-top: 2px;
+}
+
 .agent-list {
   display: flex;
   flex-direction: column;
@@ -822,6 +864,51 @@ textarea:focus {
   padding: 10px 12px;
   color: #9e4545;
   font-size: 11px;
+}
+
+.security-panel {
+  border-top: 1px solid #e1dfd8;
+  padding: 10px max(22px, calc((100% - 800px) / 2)) 0;
+  background: #f8f7f3;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.security-event {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+}
+
+.security-event-detail {
+  color: #83837c;
+}
+
+.decision-badge {
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.decision-allow {
+  color: #277756;
+  background: #dcf2e9;
+}
+
+.decision-allow_redacted {
+  color: #8a6a1f;
+  background: #fbedc7;
+}
+
+.decision-deny {
+  color: #ac4343;
+  background: #f6dfdc;
 }
 
 .composer {

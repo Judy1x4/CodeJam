@@ -1,4 +1,4 @@
-import type { Agent, AgentRun, Message, SystemInfo } from "./types";
+import type { Agent, AgentRun, DemoPrincipal, Message, SecurityEvent, SystemInfo } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -69,13 +69,17 @@ export const api = {
     request<{ messages: Message[] }>("/api/agents/" + id + "/messages"),
   runs: (id: string) =>
     request<{ runs: AgentRun[] }>("/api/agents/" + id + "/runs"),
-  sendMessage: (id: string, content: string) =>
+  sendMessage: (id: string, content: string, principalId: string) =>
     request<{ run: AgentRun; message: Message }>(
       "/api/agents/" + id + "/messages",
       {
         method: "POST",
+        headers: { "X-Demo-Principal": principalId },
         body: JSON.stringify({ content }),
       },
     ),
   run: (id: string) => request<{ run: AgentRun }>("/api/runs/" + id),
+  principals: () => request<{ principals: DemoPrincipal[] }>("/api/security/principals"),
+  securityEvents: (runId: string) =>
+    request<{ securityEvents: SecurityEvent[] }>("/api/runs/" + runId + "/security-events"),
 };

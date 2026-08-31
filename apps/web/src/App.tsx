@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, setAuthToken } from "./api";
-import type { Agent, AgentRun, Message, SystemInfo } from "./types";
+import type { Agent, AgentRun, DemoPrincipal, Message, SecurityEvent, SystemInfo } from "./types";
+
+const decisionLabels: Record<SecurityEvent["decision"], string> = {
+  allow: "Allowed",
+  allow_redacted: "Allowed · redacted",
+  deny: "Denied",
+};
 
 const starterPrompts = [
   "Create a small TypeScript CLI that prints a weather summary from sample JSON.",
@@ -40,6 +46,9 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [system, setSystem] = useState<SystemInfo | null>(null);
+  const [principals, setPrincipals] = useState<DemoPrincipal[]>([]);
+  const [selectedPrincipalId, setSelectedPrincipalId] = useState<string | null>(null);
+  const [securityEvents, setSecurityEvents] = useState<SecurityEvent[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -78,7 +87,18 @@ export default function App() {
   }, []);
 
   const bootstrap = useCallback(async () => {
-    await Promise.all([refreshAgents(), api.system().then(setSystem)]);
+    await Promise.all([
+      refreshAgents(),
+      api.system().then(setSystem),
+      api.principals().then(({ principals: next }) => {
+        setPrincipals(next);
+        setSelectedPrincipalId((current) =>
+          current && next.some((principal) => principal.id === current)
+            ? current
+            : (next[0]?.id ?? null),
+        );
+      }),
+    ]);
   }, [refreshAgents]);
 
   useEffect(() => {
@@ -132,6 +152,23 @@ export default function App() {
   useEffect(() => {
     messageEnd.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, activeRun]);
+
+  useEffect(() => {
+    if (!activeRun) {
+      setSecurityEvents([]);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .securityEvents(activeRun.id)
+      .then((result) => {
+        if (!cancelled) setSecurityEvents(result.securityEvents);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRun?.id]);
 
   const createAgent = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -222,12 +259,12 @@ export default function App() {
 
   const sendMessage = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!selected || !prompt.trim()) return;
+    if (!selected || !prompt.trim() || !selectedPrincipalId) return;
     const content = prompt.trim();
     setPrompt("");
     setError(null);
     try {
-      const result = await api.sendMessage(selected.id, content);
+      const result = await api.sendMessage(selected.id, content, selectedPrincipalId);
       if (selectedIdRef.current === selected.id) {
         setMessages((current) => [...current, result.message]);
         setActiveRun(result.run);
@@ -330,6 +367,28 @@ export default function App() {
         >
           <span>＋</span> Create Agent
         </button>
+
+        {principals.length > 0 && (
+          <div className="principal-picker">
+            <div className="sidebar-label">
+              <span>Acting as</span>
+            </div>
+            <div className="principal-list">
+              {principals.map((principal) => (
+                <button
+                  key={principal.id}
+                  className={
+                    "principal-card " + (principal.id === selectedPrincipalId ? "selected" : "")
+                  }
+                  onClick={() => setSelectedPrincipalId(principal.id)}
+                >
+                  <strong>{principal.displayName}</strong>
+                  <span>{principal.department}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="sidebar-label">
           <span>Your Agents</span>
@@ -541,6 +600,29 @@ export default function App() {
                 <div ref={messageEnd} />
               </div>
 
+              {securityEvents.length > 0 && (
+                <div className="security-panel">
+                  {securityEvents.map((event) => (
+                    <div className="security-event" key={event.id}>
+                      <span className={"decision-badge decision-" + event.decision}>
+                        {decisionLabels[event.decision]}
+                      </span>
+                      <span className="security-event-detail">{event.reasonCode}</span>
+                      {event.resourceIds.length > 0 && (
+                        <span className="security-event-detail">
+                          {event.resourceIds.join(", ")}
+                        </span>
+                      )}
+                      {event.redactionCount > 0 && (
+                        <span className="security-event-detail">
+                          {event.redactionCount} redaction{event.redactionCount === 1 ? "" : "s"}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <form className="composer" onSubmit={sendMessage}>
                 <textarea
                   value={prompt}
@@ -571,6 +653,7 @@ export default function App() {
                     className="send-button"
                     disabled={
                       !prompt.trim() ||
+                      !selectedPrincipalId ||
                       selected.status === "stopped" ||
                       selected.status === "busy" ||
                       (activeRun != null && ["queued", "running"].includes(activeRun.status))

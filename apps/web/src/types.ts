@@ -38,6 +38,30 @@ export interface AgentRun {
   createdAt: string;
 }
 
+export type Classification = "public" | "internal" | "confidential" | "restricted";
+export type PolicyDecision = "allow" | "allow_redacted" | "deny";
+
+export interface DemoPrincipal {
+  id: string;
+  displayName: string;
+  department: string;
+  roles: string[];
+  active: boolean;
+}
+
+export interface SecurityEvent {
+  id: string;
+  runId: string | null;
+  agentId: string;
+  principalId: string;
+  action: string;
+  resourceIds: string[];
+  decision: PolicyDecision;
+  reasonCode: string;
+  redactionCount: number;
+  createdAt: string;
+}
+
 export interface SystemInfo {
   arkConfigured: boolean;
   arkBaseUrl: string;

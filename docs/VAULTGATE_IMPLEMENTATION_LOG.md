@@ -192,3 +192,62 @@ definition of done states "the middleware works end to end through the
 backend with automated evidence. The UI may still be unchanged." The
 principal selector that fixes this is Day 2 Block 1 scope, not a regression
 introduced here.
+
+## Day 2 — Block 1: Minimal UI
+
+**Status:** done
+
+**What was done:**
+
+- `apps/web/src/types.ts` — added `Classification`, `PolicyDecision`,
+  `DemoPrincipal`, `SecurityEvent`, mirroring the server response shapes the
+  UI actually consumes.
+- `apps/web/src/api.ts` — added `principals()` and `securityEvents(runId)`;
+  `sendMessage` now takes a `principalId` and sends it as the
+  `X-Demo-Principal` header.
+- `apps/web/src/App.tsx`:
+  - New `principals`/`selectedPrincipalId` state, fetched in `bootstrap`
+    alongside Agents and system info; defaults to the first principal.
+  - An "Acting as" selector in the sidebar (Alice/Bob), same interaction
+    pattern as the existing Agent list.
+  - `sendMessage` passes `selectedPrincipalId` through; the send button is
+    also disabled when no principal is selected yet.
+  - New `securityEvents` state, fetched whenever `activeRun.id` changes,
+    rendered as a small panel between the message thread and the composer:
+    a decision badge (allow / allow_redacted / deny), reason code, document
+    IDs, and redaction count.
+- `apps/web/src/styles.css` — badge colors per decision (green/amber/red)
+  and panel layout only, no broader redesign.
+- Ran `npm run check` — clean (48 tests passing; unchanged from Block 4,
+  this block is frontend-only).
+
+**Exit evidence (per plan):** the browser can visibly demonstrate one
+`allow` and one `deny`. **Met and verified in a real browser** — not just
+via typecheck/build. Details below.
+
+**Browser verification performed:** `npm run check` passing was not treated
+as sufficient for a UI change. Launched the actual local POC (`npm run poc`,
+real Docker runtime, real Ark model — no mocks) and drove it with a headless
+Chromium (Playwright) script: unlocked the access-token screen, confirmed
+the "Acting as" picker renders, created a real Agent named
+`Finance Analyst Agent`, sent "What were the approved expenses and budget
+variance for Project Atlas?" as Alice, and again as Bob without switching
+Agents. Screenshots confirmed:
+- The principal picker and evidence panel render with no layout issues
+  (no overlap, badges legible, colors correct).
+- Alice's request: green `ALLOWED` badge, `authorized` reason, `FIN-001,
+  FIN-003` — and the real Codex/Ark model answered citing `[FIN-001]` using
+  only the authorized excerpt.
+- Bob's request (same Agent, same question): red `DENIED` badge,
+  `grant_missing_or_revoked` reason, and the chat shows the fixed VaultGate
+  denial message — confirming the cross-user denial from Block 3's
+  principal-specific grant fix actually holds through the full stack, not
+  just in unit tests.
+
+This required downloading a headless Chromium via Playwright and its
+missing shared libraries (`libnspr4`, `libnss3`, etc., not preinstalled and
+no root available) via `apt-get download` + `dpkg-deb -x` into a scratch
+directory — no system changes, all cleaned up afterward, along with the POC
+server and any runtime containers it started.
+
+**Deviations from plan:** none.
