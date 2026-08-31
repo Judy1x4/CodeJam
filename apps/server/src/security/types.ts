@@ -26,6 +26,12 @@ export interface AgentGrant {
   revokedAt: string | null;
 }
 
+export interface RevokedGrant {
+  principalId: string;
+  agentName: string;
+  revokedAt: string;
+}
+
 export interface SecurityEvent {
   id: string;
   runId: string | null;

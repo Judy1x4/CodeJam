@@ -1,5 +1,5 @@
 import { agentGrantProfiles, type AgentGrantProfile } from "./fixtures.js";
-import type { Classification, DemoPrincipal, ProtectedDocument } from "./types.js";
+import type { Classification, DemoPrincipal, ProtectedDocument, RevokedGrant } from "./types.js";
 
 export interface PolicyCheckInput {
   principal: DemoPrincipal;
@@ -18,6 +18,19 @@ const classificationRank: Record<Classification, number> = {
   confidential: 2,
   restricted: 3,
 };
+
+export function applyRevocations(
+  profiles: AgentGrantProfile[],
+  revoked: RevokedGrant[],
+): AgentGrantProfile[] {
+  const revokedAtByKey = new Map(
+    revoked.map((entry) => [entry.principalId + "|" + entry.agentName, entry.revokedAt]),
+  );
+  return profiles.map((profile) => {
+    const revokedAt = revokedAtByKey.get(profile.principalId + "|" + profile.agentName);
+    return revokedAt ? { ...profile, revokedAt } : profile;
+  });
+}
 
 export function evaluateDocumentAccess(
   input: PolicyCheckInput,

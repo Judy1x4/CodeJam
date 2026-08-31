@@ -1,4 +1,4 @@
-import type { SecurityEvent } from "./security/types.js";
+import type { RevokedGrant, SecurityEvent } from "./security/types.js";
 
 export type AgentStatus = "ready" | "busy" | "stopped" | "error";
 export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -51,6 +51,7 @@ export interface Database {
   messages: Message[];
   runs: AgentRun[];
   securityEvents: SecurityEvent[];
+  revokedGrants: RevokedGrant[];
 }
 
 export interface CreateAgentInput {

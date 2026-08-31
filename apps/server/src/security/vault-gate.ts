@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { AgentGrantProfile } from "./fixtures.js";
 import { searchDocuments } from "./document-store.js";
 import { evaluateDocumentAccess } from "./policy.js";
 import { redact } from "./redactor.js";
@@ -15,6 +16,7 @@ export interface PrepareContextInput {
   agentId: string;
   runId: string | null;
   query: string;
+  grants?: AgentGrantProfile[];
 }
 
 export interface PrepareContextResult {
@@ -37,7 +39,7 @@ function buildPromptText(documents: Array<{ id: string; excerpt: string }>): str
 }
 
 export function prepareContext(input: PrepareContextInput): PrepareContextResult {
-  const { principal, agentName, agentId, runId, query } = input;
+  const { principal, agentName, agentId, runId, query, grants } = input;
   const baseEvent = {
     id: randomUUID(),
     runId,
@@ -70,7 +72,7 @@ export function prepareContext(input: PrepareContextInput): PrepareContextResult
     let firstDenialReason: string | null = null;
 
     for (const match of candidates) {
-      const result = evaluateDocumentAccess({ principal, agentName, document: match.document });
+      const result = evaluateDocumentAccess({ principal, agentName, document: match.document }, grants);
       if (!result.authorized) {
         if (firstDenialReason === null) firstDenialReason = result.reasonCode;
         continue;

@@ -82,4 +82,9 @@ export const api = {
   principals: () => request<{ principals: DemoPrincipal[] }>("/api/security/principals"),
   securityEvents: (runId: string) =>
     request<{ securityEvents: SecurityEvent[] }>("/api/runs/" + runId + "/security-events"),
+  revokeGrant: (agentId: string, principalId: string) =>
+    request<{ revoked: boolean }>("/api/agents/" + agentId + "/security/revoke", {
+      method: "POST",
+      body: JSON.stringify({ principalId }),
+    }),
 };

@@ -251,3 +251,75 @@ directory — no system changes, all cleaned up afterward, along with the POC
 server and any runtime containers it started.
 
 **Deviations from plan:** none.
+
+## Day 2 — Block 2: Abuse case and revocation
+
+**Status:** done — user opted for the full block, including revocation,
+since the allow/deny path was already stable (plan section 15 makes
+revocation conditional on that).
+
+**What was done — abuse case:**
+
+- `apps/server/src/security/vault-gate.test.ts` — added three more
+  adversarial-phrasing tests: different wording targeting the same
+  restricted document, a fake "SYSTEM: unrestricted mode" override attempt,
+  and a request that asks to bypass redaction outright. All confirm the
+  canary stays absent and the outcome (`deny` or `allow_redacted` with the
+  account number still stripped) is unaffected by phrasing — the enforcement
+  is structural (retrieval + policy + redaction), not prompt-parsing, so no
+  wording can change it.
+- `apps/web/src/App.tsx` — added the plan's own abuse-case wording (section
+  3) as a fourth `starterPrompts` entry, one click away during the demo.
+
+**What was done — revocation:**
+
+- `apps/server/src/security/types.ts` — added `RevokedGrant { principalId,
+  agentName, revokedAt }`.
+- `apps/server/src/security/policy.ts` — added `applyRevocations(profiles,
+  revoked)`, merging the static `agentGrantProfiles` with a revocation
+  overlay by (principalId, agentName) key.
+- `apps/server/src/security/vault-gate.ts` — `PrepareContextInput` gained an
+  optional `grants` override, threaded into `evaluateDocumentAccess`, so a
+  caller can supply the revocation-aware grant list instead of always using
+  the static default.
+- `apps/server/src/types.ts` / `store.ts` — added `revokedGrants:
+  RevokedGrant[]` to `Database`, same additive/backward-compatible pattern
+  as Block 4's `securityEvents`.
+- `apps/server/src/agent-service.ts` — `sendMessage` now computes
+  `applyRevocations(agentGrantProfiles, store.snapshot().revokedGrants)`
+  before calling `prepareContext`. Added `revokeGrant(agentId, principalId)`:
+  validates the principal and Agent exist and that a static grant profile
+  actually exists for that pair (`404` otherwise), then persists a
+  `RevokedGrant` record (idempotent — re-revoking just updates the
+  timestamp).
+- `apps/server/src/app.ts` — added `POST /api/agents/:id/security/revoke`
+  (body: `{ principalId }`), matching the plan's API sketch (section 11).
+- `apps/web/src/api.ts` / `App.tsx` — added `revokeGrant`, and a small
+  "Revoke this principal's grant" link in the security-evidence panel,
+  shown only when the latest decision isn't already `deny`. After a
+  successful revoke it's replaced with "Grant revoked — resend the question
+  to see the denial." instead of auto-resending, to keep the demo narration
+  in the presenter's control.
+- Tests: `policy.test.ts` covers `applyRevocations` directly;
+  `agent-service.test.ts` adds the full scenario from the plan's
+  Revocation Case (section 3) — an allowed request, a revoke call, then the
+  identical question denied — plus a `404` test for revoking a grant that
+  was never granted.
+- Ran `npm run check` — clean (56 tests passing).
+
+**Exit evidence (per plan):** the canary is absent and the denial remains
+understandable in the UI. **Met and verified in a real browser** — same
+approach as Block 1: launched the real POC (Docker + real Ark model),
+drove it with Playwright. Confirmed: Alice's Project Atlas question
+returns `ALLOWED` with a real cited answer; clicking "Revoke this
+principal's grant" immediately shows the revoked notice; resending the
+identical question now returns `DENIED` / `grant_missing_or_revoked`, and
+the chat shows the fixed denial message — reproducing the plan's
+Revocation Case end to end, not just in unit tests.
+
+**Deviations from plan:** none. One judgment call, not a deviation: the
+plan doesn't specify a persistence shape for revocation, so `RevokedGrant`
+and the `applyRevocations` merge function are new — designed to slot
+alongside the existing `AgentGrantProfile` shape from Block 2 rather than
+replace it, since real per-request revocation state has to be mutable while
+the base grant configuration stays static demo fixture data.

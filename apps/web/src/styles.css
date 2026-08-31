@@ -911,6 +911,27 @@ textarea:focus {
   background: #f6dfdc;
 }
 
+.revoke-link {
+  align-self: flex-start;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #a13f3f;
+  font-size: 10px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.revoke-link:hover:not(:disabled) {
+  color: #7f2f2f;
+}
+
+.revoke-link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .composer {
   margin: 0;
   border-top: 1px solid #e1dfd8;

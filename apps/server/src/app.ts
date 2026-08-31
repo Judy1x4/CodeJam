@@ -25,6 +25,9 @@ const updateAgentBody = createAgentBody.partial().refine(
 const messageBody = z.object({
   content: z.string().trim().min(1).max(50_000),
 });
+const revokeBody = z.object({
+  principalId: z.string().trim().min(1),
+});
 
 export async function createApp(
   config: AppConfig,
@@ -133,6 +136,13 @@ export async function createApp(
   app.get("/api/security/principals", async () => ({
     principals: service.listPrincipals(),
   }));
+
+  app.post("/api/agents/:id/security/revoke", async (request) => {
+    const { id } = agentIdParams.parse(request.params);
+    const body = revokeBody.parse(request.body);
+    await service.revokeGrant(id, body.principalId);
+    return { revoked: true };
+  });
 
   app.get("/api/runs/:id", async (request) => {
     const { id } = runIdParams.parse(request.params);

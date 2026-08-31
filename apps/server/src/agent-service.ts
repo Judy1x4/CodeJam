@@ -2,7 +2,8 @@ import { randomUUID } from "node:crypto";
 import type { AppConfig } from "./config.js";
 import { isArkConfigured } from "./config.js";
 import { HttpError, RunCancelledError } from "./errors.js";
-import { demoPrincipals } from "./security/fixtures.js";
+import { agentGrantProfiles, demoPrincipals } from "./security/fixtures.js";
+import { applyRevocations } from "./security/policy.js";
 import type { DemoPrincipal, SecurityEvent } from "./security/types.js";
 import { prepareContext } from "./security/vault-gate.js";
 import { JsonStore } from "./store.js";
@@ -167,6 +168,31 @@ export class AgentService {
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
+  async revokeGrant(agentId: string, principalId: string): Promise<void> {
+    const principal = demoPrincipals.find((candidate) => candidate.id === principalId);
+    if (!principal) {
+      throw new HttpError(404, "Unknown demo principal");
+    }
+    const agent = this.getAgent(agentId);
+    const hasProfile = agentGrantProfiles.some(
+      (profile) => profile.principalId === principalId && profile.agentName === agent.name,
+    );
+    if (!hasProfile) {
+      throw new HttpError(404, "No grant exists for this principal on this Agent");
+    }
+    const timestamp = now();
+    await this.store.mutate((database) => {
+      const existing = database.revokedGrants.find(
+        (entry) => entry.principalId === principalId && entry.agentName === agent.name,
+      );
+      if (existing) {
+        existing.revokedAt = timestamp;
+      } else {
+        database.revokedGrants.push({ principalId, agentName: agent.name, revokedAt: timestamp });
+      }
+    });
+  }
+
   async sendMessage(
     agentId: string,
     prompt: string,
@@ -185,12 +211,14 @@ export class AgentService {
     const agent = this.getAgent(agentId);
     const timestamp = now();
     const runId = randomUUID();
+    const effectiveGrants = applyRevocations(agentGrantProfiles, this.store.snapshot().revokedGrants);
     const vaultResult = prepareContext({
       principal,
       agentName: agent.name,
       agentId,
       runId,
       query: prompt,
+      grants: effectiveGrants,
     });
     const denied = vaultResult.decision === "deny";
     const securedPrompt =

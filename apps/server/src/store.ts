@@ -8,6 +8,7 @@ const emptyDatabase = (): Database => ({
   messages: [],
   runs: [],
   securityEvents: [],
+  revokedGrants: [],
 });
 
 export class JsonStore {
@@ -26,6 +27,9 @@ export class JsonStore {
       }
       if (!Array.isArray(parsed.securityEvents)) {
         parsed.securityEvents = [];
+      }
+      if (!Array.isArray(parsed.revokedGrants)) {
+        parsed.revokedGrants = [];
       }
       this.data = parsed;
     } catch (error) {

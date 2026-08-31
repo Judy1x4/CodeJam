@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { agentGrantProfiles, demoPrincipals, protectedDocuments } from "./fixtures.js";
-import { evaluateDocumentAccess } from "./policy.js";
+import { applyRevocations, evaluateDocumentAccess } from "./policy.js";
 
 const alice = demoPrincipals.find((principal) => principal.id === "alice-finance")!;
 const bob = demoPrincipals.find((principal) => principal.id === "bob-engineering")!;
@@ -72,5 +72,33 @@ describe("evaluateDocumentAccess", () => {
       document: financeDoc,
     });
     expect(result).toEqual({ authorized: false, reasonCode: "principal_inactive" });
+  });
+});
+
+describe("applyRevocations", () => {
+  it("leaves grants untouched when nothing is revoked", () => {
+    const result = applyRevocations(agentGrantProfiles, []);
+    expect(result).toEqual(agentGrantProfiles);
+  });
+
+  it("marks the matching grant revoked and leaves the other grant alone", () => {
+    const result = applyRevocations(agentGrantProfiles, [
+      { principalId: "alice-finance", agentName: "Finance Analyst Agent", revokedAt: "2026-01-01T00:00:00.000Z" },
+    ]);
+    const aliceGrant = result.find((grant) => grant.principalId === "alice-finance")!;
+    const bobGrant = result.find((grant) => grant.principalId === "bob-engineering")!;
+    expect(aliceGrant.revokedAt).toBe("2026-01-01T00:00:00.000Z");
+    expect(bobGrant.revokedAt).toBeNull();
+  });
+
+  it("produces grants that evaluateDocumentAccess then denies", () => {
+    const revoked = applyRevocations(agentGrantProfiles, [
+      { principalId: "alice-finance", agentName: "Finance Analyst Agent", revokedAt: "2026-01-01T00:00:00.000Z" },
+    ]);
+    const result = evaluateDocumentAccess(
+      { principal: alice, agentName: "Finance Analyst Agent", document: financeDoc },
+      revoked,
+    );
+    expect(result).toEqual({ authorized: false, reasonCode: "grant_missing_or_revoked" });
   });
 });

@@ -193,4 +193,31 @@ describe("VaultGate integration", () => {
     expect(runner.calls).toHaveLength(0);
     expect(service.getRuns(agent.id)).toHaveLength(0);
   });
+
+  it("denies a previously-successful request after the grant is revoked", async () => {
+    const runner = new RecordingRunner();
+    const service = await makeService(runner);
+    const agent = await service.createAgent({ name: "Finance Analyst Agent" });
+    const question = "What were the approved expenses and budget variance for Project Atlas?";
+
+    const first = await service.sendMessage(agent.id, question, "alice-finance");
+    await expect.poll(() => service.getRun(first.run.id).status).toBe("completed");
+    expect(service.getSecurityEvents(first.run.id)[0]?.decision).not.toBe("deny");
+
+    await service.revokeGrant(agent.id, "alice-finance");
+
+    const second = await service.sendMessage(agent.id, question, "alice-finance");
+    expect(runner.calls).toHaveLength(1); // still just the one call from before the revoke
+    expect(service.getRun(second.run.id).status).toBe("completed");
+    expect(service.getSecurityEvents(second.run.id)[0]?.decision).toBe("deny");
+  });
+
+  it("rejects revoking a grant that was never granted", async () => {
+    const service = await makeService();
+    const agent = await service.createAgent({ name: "Finance Analyst Agent" });
+
+    await expect(service.revokeGrant(agent.id, "bob-engineering")).rejects.toMatchObject({
+      statusCode: 404,
+    });
+  });
 });
